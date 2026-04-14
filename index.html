@@ -68,6 +68,8 @@
             width: 250px;
             height: 250px;
             margin: 0 auto 20px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
         }
         input[type="text"] {
             width: 100%;
@@ -109,9 +111,6 @@
             padding: 10px 20px;
             margin-top: 20px;
             width: 100%;
-        }
-        .reset-btn:hover {
-            transform: translateY(-2px);
         }
         .result {
             margin-top: 20px;
@@ -178,13 +177,13 @@
         <h1>Chill&chat speaking club</h1>
         
         <div class="qr-section">
-            <img id="qrImage" src="" alt="QR Code" class="qr-code">
+            <img id="qrImage" alt="QR Code" class="qr-code">
             <p style="color: #666; font-size: 1.1em;">Scan QR code with your phone</p>
         </div>
 
         <div id="registerForm">
             <input type="text" id="participantName" placeholder="Enter your full name" maxlength="50">
-            <button onclick="registerParticipant()">Register</button>
+            <button id="registerBtn">Register</button>
         </div>
 
         <div id="result" class="result" style="display: none;"></div>
@@ -218,230 +217,275 @@
 
             <div id="adminResult" class="result" style="display: none; margin-top: 20px;"></div>
             
-            <button class="reset-btn" onclick="adminReset()">🔄 Reset Game</button>
+            <button id="resetBtn" class="reset-btn">🔄 Reset Game</button>
         </div>
     </div>
 
     <script>
+        // ======================== GLOBALS ========================
         const API_URL = '/api';
-let isAdmin = false;
-let winnerDrawn = false;
-let pollInterval = null;
+        let isAdmin = false;
+        let winnerDrawn = false;
+        let pollInterval = null;
 
-window.addEventListener('load', () => {
-  document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.href)}`;
-  checkAdminAccess();
-});
+        // ======================== UTILITIES ========================
+        async function fetchJSON(url, options = {}) {
+            const res = await fetch(url, options);
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 100)}`);
+            }
+            return res.json();
+        }
 
-function checkAdminAccess() {
-  if (sessionStorage.getItem('adminMode') === 'true') {
-    isAdmin = true;
-    loadAdminPanel();
-  } else {
-    loadParticipantView();
-  }
-}
+        // ======================== PARTICIPANT ACTIONS ========================
+        async function registerParticipant() {
+            const nameInput = document.getElementById('participantName');
+            const btn = document.getElementById('registerBtn');
+            const name = nameInput.value.trim();
 
-async function registerParticipant() {
-  const nameInput = document.getElementById('participantName');
-  const btn = document.querySelector('#registerForm button');
-  const name = nameInput.value.trim();
+            if (!name) {
+                alert('Please enter your name');
+                return;
+            }
 
-  if (!name) {
-    alert('Please enter your name');
-    return;
-  }
+            btn.disabled = true;
+            btn.textContent = 'Registering...';
 
-  btn.disabled = true;
-  btn.textContent = 'Registering...';
+            try {
+                await fetchJSON(`${API_URL}/participants`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, timestamp: Date.now() })
+                });
 
-  try {
-    const res = await fetch(`${API_URL}/participants`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, timestamp: Date.now() })
-    });
+                // Success
+                sessionStorage.setItem('participantName', name);
+                nameInput.disabled = true;
+                document.getElementById('registerForm').style.opacity = '0.7';
+                document.getElementById('scanComplete').style.display = 'block';
+                await refreshParticipantCount();
 
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP ${res.status}`);
-    }
+            } catch (err) {
+                console.error('Registration error:', err);
+                alert(`Registration failed: ${err.message}. Please try again.`);
+                nameInput.value = '';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Register';
+            }
+        }
 
-    // Success
-    sessionStorage.setItem('participantName', name);
-    nameInput.disabled = true;
-    document.getElementById('registerForm').style.opacity = '0.7';
-    document.getElementById('scanComplete').style.display = 'block';
-    await refreshParticipantCount();
+        async function refreshParticipantCount() {
+            try {
+                const data = await fetchJSON(`${API_URL}/participants`);
+                const participants = data ? Object.values(data) : [];
+                const count = participants.length;
 
-  } catch (err) {
-    console.error('Registration error:', err);
-    alert(`Registration failed: ${err.message}. Please try again.`);
-    nameInput.value = '';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Register';
-  }
-}
+                document.getElementById('totalCount').textContent = count;
 
-async function refreshParticipantCount() {
-  try {
-    const res = await fetch(`${API_URL}/participants`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const participants = data ? Object.values(data) : [];
-    const count = participants.length;
+                if (count === 20 && !winnerDrawn) {
+                    document.getElementById('registerForm').style.display = 'none';
+                    document.getElementById('fullMessage').style.display = 'block';
+                    document.getElementById('scanComplete').style.display = 'none';
+                    setTimeout(() => autoDrawWinner(participants), 3000);
+                }
+            } catch (err) {
+                console.error('Count refresh error:', err);
+            }
+        }
 
-    document.getElementById('totalCount').textContent = count;
+        async function autoDrawWinner(participants) {
+            if (winnerDrawn || !participants || participants.length !== 20) return;
 
-    if (count === 20 && !winnerDrawn) {
-      document.getElementById('registerForm').style.display = 'none';
-      document.getElementById('fullMessage').style.display = 'block';
-      document.getElementById('scanComplete').style.display = 'none';
-      setTimeout(() => autoDrawWinner(participants), 3000);
-    }
-  } catch (err) {
-    console.error('Count refresh error:', err);
-  }
-}
+            const randomIndex = Math.floor(Math.random() * 20);
+            const winnerName = participants[randomIndex].name;
 
-async function autoDrawWinner(participants) {
-  if (winnerDrawn || !participants || participants.length !== 20) return;
+            try {
+                await fetchJSON(`${API_URL}/winner`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: winnerName, timestamp: Date.now() })
+                });
+                winnerDrawn = true;
+                await checkWinner();
+            } catch (err) {
+                console.error('Auto draw error:', err);
+            }
+        }
 
-  const randomIndex = Math.floor(Math.random() * 20);
-  const winnerName = participants[randomIndex].name;
+        async function checkWinner() {
+            try {
+                const data = await fetchJSON(`${API_URL}/winner`);
+                if (data && data.name) {
+                    winnerDrawn = true;
+                    document.getElementById('fullMessage').style.display = 'none';
+                    document.getElementById('winnerInfo').style.display = 'block';
+                    document.getElementById('winnerName').textContent = data.name;
 
-  try {
-    const res = await fetch(`${API_URL}/winner`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: winnerName, timestamp: Date.now() })
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    winnerDrawn = true;
-    await checkWinner();
-  } catch (err) {
-    console.error('Auto draw error:', err);
-  }
-}
+                    const resultDiv = document.getElementById('result');
+                    resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${data.name}! 🎉<br>Free session awarded!`;
+                    resultDiv.className = 'result winner';
+                    resultDiv.style.display = 'block';
+                }
+            } catch (err) {
+                console.error('Winner check error:', err);
+            }
+        }
 
-async function checkWinner() {
-  try {
-    const res = await fetch(`${API_URL}/winner`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data && data.name) {
-      winnerDrawn = true;
-      document.getElementById('fullMessage').style.display = 'none';
-      document.getElementById('winnerInfo').style.display = 'block';
-      document.getElementById('winnerName').textContent = data.name;
+        // ======================== ADMIN ACTIONS ========================
+        async function adminReset() {
+            const password = prompt('Enter admin password:');
+            if (password !== 'admin123') {
+                alert('Wrong password!');
+                return;
+            }
+            if (!confirm('Reset all data? This cannot be undone.')) return;
 
-      const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${data.name}! 🎉<br>Free session awarded!`;
-      resultDiv.className = 'result winner';
-      resultDiv.style.display = 'block';
-    }
-  } catch (err) {
-    console.error('Winner check error:', err);
-  }
-}
+            try {
+                await Promise.all([
+                    fetch(`${API_URL}/participants`, { method: 'DELETE', headers: { 'x-admin-key': 'admin123' } }),
+                    fetch(`${API_URL}/winner`, { method: 'DELETE', headers: { 'x-admin-key': 'admin123' } })
+                ]);
+                winnerDrawn = false;
+                sessionStorage.clear();
+                alert('✅ Game reset successfully!');
+                location.reload();
+            } catch (err) {
+                console.error('Reset error:', err);
+                alert('❌ Reset failed. Check console.');
+            }
+        }
 
-async function adminReset() {
-  const password = prompt('Enter admin password:');
-  if (password !== 'admin123') {
-    alert('Wrong password!');
-    return;
-  }
-  if (!confirm('Reset all data? This cannot be undone.')) return;
+        // ======================== UI VIEWS ========================
+        async function refreshAdminData() {
+            try {
+                const [participantsData, winnerData] = await Promise.all([
+                    fetchJSON(`${API_URL}/participants`),
+                    fetchJSON(`${API_URL}/winner`)
+                ]);
 
-  try {
-    await Promise.all([
-      fetch(`${API_URL}/participants`, { method: 'DELETE', headers: { 'x-admin-key': 'admin123' } }),
-      fetch(`${API_URL}/winner`, { method: 'DELETE', headers: { 'x-admin-key': 'admin123' } })
-    ]);
-    winnerDrawn = false;
-    sessionStorage.clear();
-    alert('✅ Game reset successfully!');
-    location.reload();
-  } catch (err) {
-    console.error('Reset error:', err);
-    alert('❌ Reset failed. Check console.');
-  }
-}
+                const participants = participantsData ? Object.values(participantsData).sort((a, b) => a.timestamp - b.timestamp) : [];
+                document.getElementById('adminCount').textContent = participants.length;
 
-// Load functions (unchanged except for adding polling cleanup)
-function loadParticipantView() {
-  document.getElementById('participantView').style.display = 'block';
-  document.getElementById('adminView').style.display = 'none';
+                const list = document.getElementById('participantList');
+                if (participants.length === 0) {
+                    list.innerHTML = '<p style="color: #95a5a6;">No participants yet</p>';
+                } else {
+                    list.innerHTML = participants.map((p, i) => `<div class="participant-item">${i + 1}. ${escapeHtml(p.name)}</div>`).join('');
+                }
 
-  const savedName = sessionStorage.getItem('participantName');
-  if (savedName) {
-    document.getElementById('participantName').value = savedName;
-    document.getElementById('participantName').disabled = true;
-    document.querySelector('#registerForm button').disabled = true;
-    document.getElementById('registerForm').style.opacity = '0.7';
-    document.getElementById('scanComplete').style.display = 'block';
-  }
+                if (winnerData && winnerData.name) {
+                    winnerDrawn = true;
+                    const resultDiv = document.getElementById('adminResult');
+                    resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${escapeHtml(winnerData.name)}!`;
+                    resultDiv.className = 'result winner';
+                    resultDiv.style.display = 'block';
+                } else {
+                    // Clear winner display if no winner
+                    const resultDiv = document.getElementById('adminResult');
+                    resultDiv.style.display = 'none';
+                }
+            } catch (err) {
+                console.error('Admin data error:', err);
+            }
+        }
 
-  refreshParticipantCount();
-  checkWinner();
+        function escapeHtml(str) {
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
 
-  if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(() => {
-    refreshParticipantCount();
-    checkWinner();
-  }, 1500);
-}
+        function loadParticipantView() {
+            document.getElementById('participantView').style.display = 'block';
+            document.getElementById('adminView').style.display = 'none';
 
-async function refreshAdminData() {
-  try {
-    const [partRes, winnerRes] = await Promise.all([
-      fetch(`${API_URL}/participants`),
-      fetch(`${API_URL}/winner`)
-    ]);
-    if (!partRes.ok || !winnerRes.ok) throw new Error('Admin fetch failed');
+            const savedName = sessionStorage.getItem('participantName');
+            if (savedName) {
+                const nameInput = document.getElementById('participantName');
+                const btn = document.getElementById('registerBtn');
+                nameInput.value = savedName;
+                nameInput.disabled = true;
+                btn.disabled = true;
+                document.getElementById('registerForm').style.opacity = '0.7';
+                document.getElementById('scanComplete').style.display = 'block';
+            }
 
-    const participantsData = await partRes.json();
-    const participants = participantsData ? Object.values(participantsData).sort((a, b) => a.timestamp - b.timestamp) : [];
-    document.getElementById('adminCount').textContent = participants.length;
+            refreshParticipantCount();
+            checkWinner();
 
-    const list = document.getElementById('participantList');
-    if (participants.length === 0) {
-      list.innerHTML = '<p style="color: #95a5a6;">No participants yet</p>';
-    } else {
-      list.innerHTML = participants.map((p, i) => `<div class="participant-item">${i + 1}. ${p.name}</div>`).join('');
-    }
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(() => {
+                refreshParticipantCount();
+                checkWinner();
+            }, 1500);
+        }
 
-    const winnerData = await winnerRes.json();
-    if (winnerData && winnerData.name) {
-      winnerDrawn = true;
-      const resultDiv = document.getElementById('adminResult');
-      resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${winnerData.name}!`;
-      resultDiv.className = 'result winner';
-      resultDiv.style.display = 'block';
-    }
-  } catch (err) {
-    console.error('Admin data error:', err);
-  }
-}
+        function loadAdminPanel() {
+            document.getElementById('adminView').style.display = 'block';
+            document.getElementById('participantView').style.display = 'none';
+            refreshAdminData();
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(refreshAdminData, 800);
+        }
 
-function loadAdminPanel() {
-  document.getElementById('adminView').style.display = 'block';
-  document.getElementById('participantView').style.display = 'none';
-  refreshAdminData();
-  if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(refreshAdminData, 800);
-}
+        // ======================== QR CODE GENERATION ========================
+        function generateQRCode() {
+            const currentUrl = window.location.href;
+            // Use a reliable QR API (Google Charts is deprecated, using quickchart.io)
+            const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(currentUrl)}&size=250`;
+            const img = document.getElementById('qrImage');
+            img.src = qrUrl;
+            img.onerror = () => {
+                // Fallback: show text if QR fails
+                img.alt = 'QR Code failed to load. URL: ' + currentUrl;
+                img.style.border = '1px solid red';
+            };
+        }
 
-// Admin hotkey (Ctrl+Shift+A)
-document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.shiftKey && e.key === 'A') {
-    const pass = prompt('Admin password:');
-    if (pass === 'admin123') {
-      sessionStorage.setItem('adminMode', 'true');
-      loadAdminPanel();
-    } else {
-      alert('Wrong password');
-    }
-  }
-});
+        // ======================== INITIALIZATION & EVENT LISTENERS ========================
+        function init() {
+            generateQRCode();
+
+            // Attach event listeners (no inline onclick)
+            const registerBtn = document.getElementById('registerBtn');
+            if (registerBtn) registerBtn.addEventListener('click', registerParticipant);
+
+            const resetBtn = document.getElementById('resetBtn');
+            if (resetBtn) resetBtn.addEventListener('click', adminReset);
+
+            // Admin hotkey (Ctrl+Shift+A)
+            document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+                    e.preventDefault();
+                    const pass = prompt('Admin password:');
+                    if (pass === 'admin123') {
+                        sessionStorage.setItem('adminMode', 'true');
+                        loadAdminPanel();
+                    } else {
+                        alert('Wrong password');
+                    }
+                }
+            });
+
+            // Determine view
+            if (sessionStorage.getItem('adminMode') === 'true') {
+                loadAdminPanel();
+            } else {
+                loadParticipantView();
+            }
+        }
+
+        // Start everything when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
