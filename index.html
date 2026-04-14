@@ -224,244 +224,224 @@
 
     <script>
         const API_URL = '/api';
-        let isAdmin = false;
-        let winnerDrawn = false;
-        const currentPageUrl = window.location.href;
-        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(currentPageUrl)}`;
+let isAdmin = false;
+let winnerDrawn = false;
+let pollInterval = null;
 
-        window.addEventListener('load', () => {
-            document.getElementById('qrImage').src = qrCodeUrl;
-            checkAdminAccess();
-        });
+window.addEventListener('load', () => {
+  document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.href)}`;
+  checkAdminAccess();
+});
 
-        function checkAdminAccess() {
-            const attemptedAdmin = sessionStorage.getItem('adminMode');
-            if (attemptedAdmin === 'true') {
-                isAdmin = true;
-                loadAdminPanel();
-            } else {
-                loadParticipantView();
-            }
-        }
+function checkAdminAccess() {
+  if (sessionStorage.getItem('adminMode') === 'true') {
+    isAdmin = true;
+    loadAdminPanel();
+  } else {
+    loadParticipantView();
+  }
+}
 
-        function registerParticipant() {
-            const nameInput = document.getElementById('participantName');
-            const registerBtn = document.querySelector('#registerForm button');
-            const name = nameInput.value.trim();
-            
-            if (!name) {
-                alert('Please enter your name');
-                return;
-            }
+async function registerParticipant() {
+  const nameInput = document.getElementById('participantName');
+  const btn = document.querySelector('#registerForm button');
+  const name = nameInput.value.trim();
 
-            // Disable button during request to prevent double-submit
-            registerBtn.disabled = true;
-            registerBtn.textContent = 'Registering...';
+  if (!name) {
+    alert('Please enter your name');
+    return;
+  }
 
-            fetch(`${API_URL}/participants`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    timestamp: Date.now()
-                })
-            })
-            .then(res => {
-                // FIX: Check HTTP status before treating as success.
-                // Previously, a 400/500 error still resolved here,
-                // disabling the form and showing "complete" with nothing saved.
-                if (!res.ok) throw new Error(`Server error: ${res.status}`);
-                return res.json();
-            })
-            .then(() => {
-                // FIX: Only persist the name after confirmed server success
-                sessionStorage.setItem('participantName', name);
+  btn.disabled = true;
+  btn.textContent = 'Registering...';
 
-                nameInput.disabled = true;
-                registerBtn.disabled = true;
-                document.getElementById('registerForm').style.opacity = '0.7';
-                document.getElementById('scanComplete').style.display = 'block';
-                
-                setTimeout(refreshParticipantCount, 500);
-            })
-            .catch(err => {
-                console.log('Registration Error:', err);
-                // Restore form to usable state so user can retry
-                registerBtn.disabled = false;
-                registerBtn.textContent = 'Register';
-                alert('Registration failed. Please try again.');
-                nameInput.value = '';
-            });
-        }
+  try {
+    const res = await fetch(`${API_URL}/participants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, timestamp: Date.now() })
+    });
 
-        function refreshParticipantCount() {
-            fetch(`${API_URL}/participants`)
-                .then(res => res.json())
-                .then(data => {
-                    const participants = data ? Object.values(data) : [];
-                    const count = participants.length;
-                    
-                    document.getElementById('totalCount').textContent = count;
-                    
-                    if (count === 20 && !winnerDrawn) {
-                        document.getElementById('registerForm').style.display = 'none';
-                        document.getElementById('fullMessage').style.display = 'block';
-                        document.getElementById('scanComplete').style.display = 'none';
-                        
-                        setTimeout(() => autoDrawWinner(participants), 3000);
-                    }
-                })
-                .catch(err => console.log('Count Error:', err));
-        }
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${res.status}`);
+    }
 
-        function autoDrawWinner(participants) {
-            if (winnerDrawn) return;
-            if (!participants || participants.length !== 20) return;
+    // Success
+    sessionStorage.setItem('participantName', name);
+    nameInput.disabled = true;
+    document.getElementById('registerForm').style.opacity = '0.7';
+    document.getElementById('scanComplete').style.display = 'block';
+    await refreshParticipantCount();
 
-            const randomIndex = Math.floor(Math.random() * 20);
-            const winnerName = participants[randomIndex].name;
+  } catch (err) {
+    console.error('Registration error:', err);
+    alert(`Registration failed: ${err.message}. Please try again.`);
+    nameInput.value = '';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Register';
+  }
+}
 
-            fetch(`${API_URL}/winner`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    name: winnerName, 
-                    timestamp: Date.now() 
-                })
-            })
-            .then(res => res.json())
-            .then(() => {
-                winnerDrawn = true;
-                checkWinner();
-            })
-            .catch(err => console.log('Winner Error:', err));
-        }
+async function refreshParticipantCount() {
+  try {
+    const res = await fetch(`${API_URL}/participants`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const participants = data ? Object.values(data) : [];
+    const count = participants.length;
 
-        function loadParticipantView() {
-            document.getElementById('participantView').style.display = 'block';
-            document.getElementById('adminView').style.display = 'none';
+    document.getElementById('totalCount').textContent = count;
 
-            const savedName = sessionStorage.getItem('participantName');
-            if (savedName) {
-                document.getElementById('participantName').value = savedName;
-                document.getElementById('participantName').disabled = true;
-                document.querySelector('#registerForm button').disabled = true;
-                document.getElementById('registerForm').style.opacity = '0.7';
-                document.getElementById('scanComplete').style.display = 'block';
-            }
+    if (count === 20 && !winnerDrawn) {
+      document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('fullMessage').style.display = 'block';
+      document.getElementById('scanComplete').style.display = 'none';
+      setTimeout(() => autoDrawWinner(participants), 3000);
+    }
+  } catch (err) {
+    console.error('Count refresh error:', err);
+  }
+}
 
-            refreshParticipantCount();
-            checkWinner();
+async function autoDrawWinner(participants) {
+  if (winnerDrawn || !participants || participants.length !== 20) return;
 
-            setInterval(refreshParticipantCount, 1500);
-            setInterval(checkWinner, 1500);
-        }
+  const randomIndex = Math.floor(Math.random() * 20);
+  const winnerName = participants[randomIndex].name;
 
-        function loadAdminPanel() {
-            document.getElementById('adminView').style.display = 'block';
-            document.getElementById('participantView').style.display = 'none';
+  try {
+    const res = await fetch(`${API_URL}/winner`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: winnerName, timestamp: Date.now() })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    winnerDrawn = true;
+    await checkWinner();
+  } catch (err) {
+    console.error('Auto draw error:', err);
+  }
+}
 
-            refreshAdminData();
-            setInterval(refreshAdminData, 800);
-        }
+async function checkWinner() {
+  try {
+    const res = await fetch(`${API_URL}/winner`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data && data.name) {
+      winnerDrawn = true;
+      document.getElementById('fullMessage').style.display = 'none';
+      document.getElementById('winnerInfo').style.display = 'block';
+      document.getElementById('winnerName').textContent = data.name;
 
-        function refreshAdminData() {
-            fetch(`${API_URL}/participants`)
-                .then(res => res.json())
-                .then(data => {
-                    const participants = data ? Object.values(data).sort((a, b) => a.timestamp - b.timestamp) : [];
-                    document.getElementById('adminCount').textContent = participants.length;
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${data.name}! 🎉<br>Free session awarded!`;
+      resultDiv.className = 'result winner';
+      resultDiv.style.display = 'block';
+    }
+  } catch (err) {
+    console.error('Winner check error:', err);
+  }
+}
 
-                    const list = document.getElementById('participantList');
-                    if (participants.length === 0) {
-                        list.innerHTML = '<p style="color: #95a5a6;">No participants yet</p>';
-                    } else {
-                        list.innerHTML = participants.map((p, i) => 
-                            `<div class="participant-item">${i + 1}. ${p.name}</div>`
-                        ).join('');
-                    }
-                })
-                .catch(err => console.log('Admin Data Error:', err));
+async function adminReset() {
+  const password = prompt('Enter admin password:');
+  if (password !== 'admin123') {
+    alert('Wrong password!');
+    return;
+  }
+  if (!confirm('Reset all data? This cannot be undone.')) return;
 
-            fetch(`${API_URL}/winner`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data && data.name) {
-                        winnerDrawn = true;
-                        const resultDiv = document.getElementById('adminResult');
-                        resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${data.name}!`;
-                        resultDiv.className = 'result winner';
-                        resultDiv.style.display = 'block';
-                    }
-                })
-                .catch(err => console.log('Winner Check Error:', err));
-        }
+  try {
+    await Promise.all([
+      fetch(`${API_URL}/participants`, { method: 'DELETE', headers: { 'x-admin-key': 'admin123' } }),
+      fetch(`${API_URL}/winner`, { method: 'DELETE', headers: { 'x-admin-key': 'admin123' } })
+    ]);
+    winnerDrawn = false;
+    sessionStorage.clear();
+    alert('✅ Game reset successfully!');
+    location.reload();
+  } catch (err) {
+    console.error('Reset error:', err);
+    alert('❌ Reset failed. Check console.');
+  }
+}
 
-        function checkWinner() {
-            fetch(`${API_URL}/winner`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data && data.name) {
-                        winnerDrawn = true;
-                        document.getElementById('fullMessage').style.display = 'none';
-                        document.getElementById('winnerInfo').style.display = 'block';
-                        document.getElementById('winnerName').textContent = data.name;
+// Load functions (unchanged except for adding polling cleanup)
+function loadParticipantView() {
+  document.getElementById('participantView').style.display = 'block';
+  document.getElementById('adminView').style.display = 'none';
 
-                        const resultDiv = document.getElementById('result');
-                        resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${data.name}! 🎉<br>Free session awarded!`;
-                        resultDiv.className = 'result winner';
-                        resultDiv.style.display = 'block';
-                    }
-                })
-                .catch(err => console.log('Winner Check Error:', err));
-        }
+  const savedName = sessionStorage.getItem('participantName');
+  if (savedName) {
+    document.getElementById('participantName').value = savedName;
+    document.getElementById('participantName').disabled = true;
+    document.querySelector('#registerForm button').disabled = true;
+    document.getElementById('registerForm').style.opacity = '0.7';
+    document.getElementById('scanComplete').style.display = 'block';
+  }
 
-        function adminReset() {
-            const password = prompt('Enter admin password:');
-            if (password !== 'admin123') {
-                alert('Wrong password!');
-                return;
-            }
+  refreshParticipantCount();
+  checkWinner();
 
-            if (!confirm('Reset all data? This cannot be undone.')) {
-                return;
-            }
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(() => {
+    refreshParticipantCount();
+    checkWinner();
+  }, 1500);
+}
 
-            Promise.all([
-                fetch(`${API_URL}/participants`, {
-                    method: 'DELETE',
-                    headers: { 'x-admin-key': 'admin123' }
-                }),
-                fetch(`${API_URL}/winner`, {
-                    method: 'DELETE',
-                    headers: { 'x-admin-key': 'admin123' }
-                })
-            ])
-            .then(responses => Promise.all(responses.map(r => r.json())))
-            .then(() => {
-                winnerDrawn = false;
-                sessionStorage.clear();
-                alert('✅ Game reset successfully!');
-                location.reload();
-            })
-            .catch(err => {
-                console.log('Reset Error:', err);
-                alert('❌ Reset failed. Check console.');
-            });
-        }
+async function refreshAdminData() {
+  try {
+    const [partRes, winnerRes] = await Promise.all([
+      fetch(`${API_URL}/participants`),
+      fetch(`${API_URL}/winner`)
+    ]);
+    if (!partRes.ok || !winnerRes.ok) throw new Error('Admin fetch failed');
 
-        document.addEventListener('keydown', function(e) {
-            if (e.ctrlKey && e.shiftKey && e.key === 'A') {
-                const pass = prompt('Admin password:');
-                if (pass === 'admin123') {
-                    isAdmin = true;
-                    sessionStorage.setItem('adminMode', 'true');
-                    loadAdminPanel();
-                } else {
-                    alert('Wrong password');
-                }
-            }
-        });
-    </script>
-</body>
-</html>
+    const participantsData = await partRes.json();
+    const participants = participantsData ? Object.values(participantsData).sort((a, b) => a.timestamp - b.timestamp) : [];
+    document.getElementById('adminCount').textContent = participants.length;
+
+    const list = document.getElementById('participantList');
+    if (participants.length === 0) {
+      list.innerHTML = '<p style="color: #95a5a6;">No participants yet</p>';
+    } else {
+      list.innerHTML = participants.map((p, i) => `<div class="participant-item">${i + 1}. ${p.name}</div>`).join('');
+    }
+
+    const winnerData = await winnerRes.json();
+    if (winnerData && winnerData.name) {
+      winnerDrawn = true;
+      const resultDiv = document.getElementById('adminResult');
+      resultDiv.innerHTML = `🎉 LOTTERY WINNER: ${winnerData.name}!`;
+      resultDiv.className = 'result winner';
+      resultDiv.style.display = 'block';
+    }
+  } catch (err) {
+    console.error('Admin data error:', err);
+  }
+}
+
+function loadAdminPanel() {
+  document.getElementById('adminView').style.display = 'block';
+  document.getElementById('participantView').style.display = 'none';
+  refreshAdminData();
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(refreshAdminData, 800);
+}
+
+// Admin hotkey (Ctrl+Shift+A)
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+    const pass = prompt('Admin password:');
+    if (pass === 'admin123') {
+      sessionStorage.setItem('adminMode', 'true');
+      loadAdminPanel();
+    } else {
+      alert('Wrong password');
+    }
+  }
+});
