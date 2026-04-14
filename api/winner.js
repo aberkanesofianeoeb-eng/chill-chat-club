@@ -11,13 +11,13 @@ module.exports = async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const response = await fetch(`${FIREBASE_URL}/winner.json`, {
-        method: 'GET'
-      });
-      if (!response.ok) throw new Error(`Firebase error: ${response.status}`);
-      const data = await response.json();
-      return res.status(200).json(data || {});
-    }
+    const response = await fetch(`${FIREBASE_URL}/winner.json`);
+    if (!response.ok) throw new Error(`Firebase error: ${response.status}`);
+    const data = await response.json();
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify(data || {}));
+  }
 
     if (req.method === 'PUT') {
       if (!req.body || !req.body.name) {
