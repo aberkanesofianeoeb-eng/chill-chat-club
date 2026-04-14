@@ -1,4 +1,4 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const FIREBASE_URL = 'https://console.firebase.google.com/project/qrcode-54ca8/database/qrcode-54ca8-default-rtdb/data';
 
   res.setHeader('Access-Control-Allow-Origin', '*');
