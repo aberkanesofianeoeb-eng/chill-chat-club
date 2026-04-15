@@ -12,25 +12,30 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Missing BLOB_READ_WRITE_TOKEN' });
   }
   if (!storeId) {
-    return res.status(500).json({ error: 'Missing BLOB_STORE_ID. Add it in Environment Variables.' });
+    return res.status(500).json({ error: 'Missing BLOB_STORE_ID' });
   }
 
-  // Correct blob URL format
-  const BLOB_URL = `https://${storeId}.public.blob.vercel-storage.com/participants.json`;
+  // Correct blob URL format using store ID
+  const participantsUrl = `https://${storeId}.public.blob.vercel-storage.com/participants.json`;
 
   async function readParticipants() {
-    const response = await fetch(BLOB_URL, {
+    const response = await fetch(participantsUrl, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (response.status === 404) return [];
-    if (!response.ok) throw new Error(`Read failed: ${response.status}`);
+    if (response.status === 404) {
+      console.log('No participants file yet, returning empty');
+      return [];
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Blob read failed (${response.status}): ${text}`);
+    }
     const data = await response.json();
-    console.log(`Read ${data.length} participants`);
     return data;
   }
 
   async function writeParticipants(participants) {
-    const response = await fetch(BLOB_URL, {
+    const response = await fetch(participantsUrl, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -40,7 +45,7 @@ export default async function handler(req, res) {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Write failed: ${response.status} - ${text}`);
+      throw new Error(`Blob write failed (${response.status}): ${text}`);
     }
     console.log(`Written ${participants.length} participants`);
   }
@@ -61,6 +66,10 @@ export default async function handler(req, res) {
       let participants = await readParticipants();
       if (participants.length >= 20) {
         return res.status(409).json({ error: 'Maximum 20 participants reached' });
+      }
+      // Prevent duplicate names (optional)
+      if (participants.some(p => p.name.toLowerCase() === name.trim().toLowerCase())) {
+        return res.status(409).json({ error: 'Name already registered' });
       }
       participants.push({ name: name.trim(), timestamp: timestamp || Date.now() });
       await writeParticipants(participants);
