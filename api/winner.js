@@ -5,35 +5,35 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const KV_URL = process.env.KV_REST_API_URL;
-  const KV_TOKEN = process.env.KV_REST_API_TOKEN;
-
-  if (!KV_URL || !KV_TOKEN) {
-    return res.status(500).json({ error: 'KV not configured. Create a Redis database in Vercel Storage.' });
+  const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!BLOB_TOKEN) {
+    return res.status(500).json({ error: 'BLOB_READ_WRITE_TOKEN missing.' });
   }
 
-  async function kvGet(key) {
-    const response = await fetch(`${KV_URL}/get/${key}`, {
-      headers: { Authorization: `Bearer ${KV_TOKEN}` }
+  const BLOB_URL = `https://blob.vercel-storage.com/winner.json`;
+
+  async function readWinner() {
+    const response = await fetch(BLOB_URL, {
+      headers: { Authorization: `Bearer ${BLOB_TOKEN}` }
     });
-    const data = await response.json();
-    return data.result;
+    if (response.status === 404) return null;
+    return response.json();
   }
 
-  async function kvSet(key, value) {
-    await fetch(`${KV_URL}/set/${key}`, {
-      method: 'POST',
+  async function writeWinner(winner) {
+    await fetch(BLOB_URL, {
+      method: 'PUT',
       headers: {
-        Authorization: `Bearer ${KV_TOKEN}`,
+        Authorization: `Bearer ${BLOB_TOKEN}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ value })
+      body: JSON.stringify(winner)
     });
   }
 
   try {
     if (req.method === 'GET') {
-      const winner = await kvGet('winner');
+      const winner = await readWinner();
       return res.status(200).json(winner || {});
     }
 
@@ -43,14 +43,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Winner name required' });
       }
       const winner = { name: name.trim(), timestamp: timestamp || Date.now() };
-      await kvSet('winner', winner);
+      await writeWinner(winner);
       return res.status(200).json(winner);
     }
 
     if (req.method === 'DELETE') {
       const adminKey = req.headers['x-admin-key'];
       if (adminKey !== 'admin123') return res.status(401).json({ error: 'Unauthorized' });
-      await kvSet('winner', null);
+      await writeWinner(null);
       return res.status(200).json({ success: true });
     }
 
