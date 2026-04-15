@@ -1,3 +1,7 @@
+// HARDCODE YOUR STORE ID HERE (temporary)
+const STORE_ID = 'store_O90tt5CEPDOMLqkn'; // <-- PASTE YOUR ACTUAL STORE ID
+const TOKEN = process.env.BLOB_READ_WRITE_TOKEN; // still use env var for token
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -5,43 +9,31 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // Debug: log all env vars (will appear in Vercel function logs)
-  console.log('All env vars:', Object.keys(process.env));
-  console.log('BLOB_STORE_ID:', process.env.BLOB_STORE_ID);
-  console.log('BLOB_READ_WRITE_TOKEN exists?', !!process.env.BLOB_READ_WRITE_TOKEN);
-
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  const storeId = process.env.BLOB_STORE_ID;
-
-  if (!token) {
+  if (!TOKEN) {
     return res.status(500).json({ error: 'Missing BLOB_READ_WRITE_TOKEN' });
   }
-  if (!storeId) {
-    return res.status(500).json({ error: 'Missing BLOB_STORE_ID. Current env keys: ' + Object.keys(process.env).join(', ') });
-  }
 
-  // Use the correct URL format
-  const participantsUrl = `https://${storeId}.public.blob.vercel-storage.com/participants.json`;
+  const participantsUrl = `https://${STORE_ID}.public.blob.vercel-storage.com/participants.json`;
 
   async function readParticipants() {
-    const response = await fetch(participantsUrl, {
-      headers: { Authorization: `Bearer ${token}` }
+    const res = await fetch(participantsUrl, {
+      headers: { Authorization: `Bearer ${TOKEN}` }
     });
-    if (response.status === 404) return [];
-    if (!response.ok) throw new Error(`Read failed: ${response.status}`);
-    return response.json();
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`Read failed: ${res.status}`);
+    return res.json();
   }
 
   async function writeParticipants(participants) {
-    const response = await fetch(participantsUrl, {
+    const res = await fetch(participantsUrl, {
       method: 'PUT',
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${TOKEN}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(participants)
     });
-    if (!response.ok) throw new Error(`Write failed: ${response.status}`);
+    if (!res.ok) throw new Error(`Write failed: ${res.status}`);
   }
 
   try {
@@ -54,9 +46,13 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { name, timestamp } = req.body;
-      if (!name || name.trim() === '') return res.status(400).json({ error: 'Name required' });
+      if (!name || name.trim() === '') {
+        return res.status(400).json({ error: 'Name required' });
+      }
       let participants = await readParticipants();
-      if (participants.length >= 20) return res.status(409).json({ error: 'Max 20 reached' });
+      if (participants.length >= 20) {
+        return res.status(409).json({ error: 'Maximum 20 participants reached' });
+      }
       participants.push({ name: name.trim(), timestamp: timestamp || Date.now() });
       await writeParticipants(participants);
       return res.status(201).json({ name });
