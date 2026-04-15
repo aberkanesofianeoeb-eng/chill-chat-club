@@ -5,6 +5,11 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // Debug: log all env vars (will appear in Vercel function logs)
+  console.log('All env vars:', Object.keys(process.env));
+  console.log('BLOB_STORE_ID:', process.env.BLOB_STORE_ID);
+  console.log('BLOB_READ_WRITE_TOKEN exists?', !!process.env.BLOB_READ_WRITE_TOKEN);
+
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   const storeId = process.env.BLOB_STORE_ID;
 
@@ -12,26 +17,19 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Missing BLOB_READ_WRITE_TOKEN' });
   }
   if (!storeId) {
-    return res.status(500).json({ error: 'Missing BLOB_STORE_ID' });
+    return res.status(500).json({ error: 'Missing BLOB_STORE_ID. Current env keys: ' + Object.keys(process.env).join(', ') });
   }
 
-  // Correct blob URL format using store ID
+  // Use the correct URL format
   const participantsUrl = `https://${storeId}.public.blob.vercel-storage.com/participants.json`;
 
   async function readParticipants() {
     const response = await fetch(participantsUrl, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (response.status === 404) {
-      console.log('No participants file yet, returning empty');
-      return [];
-    }
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Blob read failed (${response.status}): ${text}`);
-    }
-    const data = await response.json();
-    return data;
+    if (response.status === 404) return [];
+    if (!response.ok) throw new Error(`Read failed: ${response.status}`);
+    return response.json();
   }
 
   async function writeParticipants(participants) {
@@ -43,11 +41,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify(participants)
     });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Blob write failed (${response.status}): ${text}`);
-    }
-    console.log(`Written ${participants.length} participants`);
+    if (!response.ok) throw new Error(`Write failed: ${response.status}`);
   }
 
   try {
@@ -60,17 +54,9 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { name, timestamp } = req.body;
-      if (!name || name.trim() === '') {
-        return res.status(400).json({ error: 'Name required' });
-      }
+      if (!name || name.trim() === '') return res.status(400).json({ error: 'Name required' });
       let participants = await readParticipants();
-      if (participants.length >= 20) {
-        return res.status(409).json({ error: 'Maximum 20 participants reached' });
-      }
-      // Prevent duplicate names (optional)
-      if (participants.some(p => p.name.toLowerCase() === name.trim().toLowerCase())) {
-        return res.status(409).json({ error: 'Name already registered' });
-      }
+      if (participants.length >= 20) return res.status(409).json({ error: 'Max 20 reached' });
       participants.push({ name: name.trim(), timestamp: timestamp || Date.now() });
       await writeParticipants(participants);
       return res.status(201).json({ name });
@@ -85,7 +71,7 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    console.error('API Error:', error);
+    console.error(error);
     return res.status(500).json({ error: error.message });
   }
 }
