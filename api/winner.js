@@ -5,30 +5,34 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!BLOB_TOKEN) {
-    return res.status(500).json({ error: 'BLOB_READ_WRITE_TOKEN missing.' });
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  const storeId = process.env.BLOB_STORE_ID;
+
+  if (!token || !storeId) {
+    return res.status(500).json({ error: 'Missing BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID' });
   }
 
-  const BLOB_URL = `https://blob.vercel-storage.com/winner.json`;
+  const BLOB_URL = `https://${storeId}.public.blob.vercel-storage.com/winner.json`;
 
   async function readWinner() {
     const response = await fetch(BLOB_URL, {
-      headers: { Authorization: `Bearer ${BLOB_TOKEN}` }
+      headers: { Authorization: `Bearer ${token}` }
     });
     if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Read failed: ${response.status}`);
     return response.json();
   }
 
   async function writeWinner(winner) {
-    await fetch(BLOB_URL, {
+    const response = await fetch(BLOB_URL, {
       method: 'PUT',
       headers: {
-        Authorization: `Bearer ${BLOB_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(winner)
     });
+    if (!response.ok) throw new Error(`Write failed: ${response.status}`);
   }
 
   try {
