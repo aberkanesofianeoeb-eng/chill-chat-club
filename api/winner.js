@@ -12,19 +12,19 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Missing BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID' });
   }
 
-  const BLOB_URL = `https://${storeId}.public.blob.vercel-storage.com/winner.json`;
+  const winnerUrl = `https://${storeId}.public.blob.vercel-storage.com/winner.json`;
 
   async function readWinner() {
-    const response = await fetch(BLOB_URL, {
+    const response = await fetch(winnerUrl, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`Read failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Blob read failed: ${response.status}`);
     return response.json();
   }
 
   async function writeWinner(winner) {
-    const response = await fetch(BLOB_URL, {
+    const response = await fetch(winnerUrl, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify(winner)
     });
-    if (!response.ok) throw new Error(`Write failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Blob write failed: ${response.status}`);
   }
 
   try {
