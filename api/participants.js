@@ -5,36 +5,36 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const KV_URL = process.env.KV_REST_API_URL;
-  const KV_TOKEN = process.env.KV_REST_API_TOKEN;
-
-  if (!KV_URL || !KV_TOKEN) {
-    return res.status(500).json({ error: 'KV not configured. Create a Redis database in Vercel Storage.' });
+  const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!BLOB_TOKEN) {
+    return res.status(500).json({ error: 'BLOB_READ_WRITE_TOKEN missing. Add it in Vercel Environment Variables.' });
   }
 
-  async function kvGet(key) {
-    const response = await fetch(`${KV_URL}/get/${key}`, {
-      headers: { Authorization: `Bearer ${KV_TOKEN}` }
+  const BLOB_URL = `https://blob.vercel-storage.com/participants.json`;
+
+  async function readData() {
+    const response = await fetch(BLOB_URL, {
+      headers: { Authorization: `Bearer ${BLOB_TOKEN}` }
     });
+    if (response.status === 404) return [];
     const data = await response.json();
-    return data.result;
+    return data;
   }
 
-  async function kvSet(key, value) {
-    await fetch(`${KV_URL}/set/${key}`, {
-      method: 'POST',
+  async function writeData(data) {
+    await fetch(BLOB_URL, {
+      method: 'PUT',
       headers: {
-        Authorization: `Bearer ${KV_TOKEN}`,
+        Authorization: `Bearer ${BLOB_TOKEN}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ value })
+      body: JSON.stringify(data)
     });
   }
 
   try {
     if (req.method === 'GET') {
-      let participants = await kvGet('participants');
-      if (!participants) participants = [];
+      const participants = await readData();
       const obj = {};
       participants.forEach((p, idx) => { obj[idx] = p; });
       return res.status(200).json(obj);
@@ -45,20 +45,19 @@ export default async function handler(req, res) {
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Name required' });
       }
-      let participants = await kvGet('participants') || [];
+      let participants = await readData();
       if (participants.length >= 20) {
         return res.status(409).json({ error: 'Maximum 20 participants reached' });
       }
-      const newParticipant = { name: name.trim(), timestamp: timestamp || Date.now() };
-      participants.push(newParticipant);
-      await kvSet('participants', participants);
-      return res.status(201).json(newParticipant);
+      participants.push({ name: name.trim(), timestamp: timestamp || Date.now() });
+      await writeData(participants);
+      return res.status(201).json({ name });
     }
 
     if (req.method === 'DELETE') {
       const adminKey = req.headers['x-admin-key'];
       if (adminKey !== 'admin123') return res.status(401).json({ error: 'Unauthorized' });
-      await kvSet('participants', []);
+      await writeData([]);
       return res.status(200).json({ success: true });
     }
 
